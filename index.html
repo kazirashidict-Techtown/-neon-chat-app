@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeonConnect Pro | Private WebRTC</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500;700&display=swap');
+        
+        body { 
+            background: radial-gradient(circle at center, #1a1a2e 0%, #0f0f1a 100%);
+            color: #e0e0e0;
+            font-family: 'Rajdhani', sans-serif;
+        }
+        .neon-glow { box-shadow: 0 0 15px rgba(0, 255, 255, 0.4); border: 1px solid rgba(0, 255, 255, 0.5); }
+        .glass { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .video-container { position: relative; overflow: hidden; border-radius: 20px; background: #000; border: 2px solid #30363d; }
+        .btn-call { background: linear-gradient(45deg, #00f2fe, #4facfe); color: #000; font-weight: bold; transition: 0.3s; }
+        .btn-call:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0, 242, 254, 0.4); }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="glass w-full max-w-4xl rounded-[30px] p-6 md:p-10 shadow-2xl flex flex-col md:flex-row gap-8">
+        
+        <div class="flex-1 space-y-6">
+            <header>
+                <h1 style="font-family: 'Orbitron', sans-serif;" class="text-3xl font-bold text-cyan-400 tracking-widest">NEON<span class="text-white">PRO</span></h1>
+                <p class="text-gray-400 text-sm">Secure Peer-to-Peer Communication</p>
+            </header>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="text-xs uppercase tracking-tighter text-cyan-500 font-bold">Your Unique Identity</label>
+                    <input id="myId" type="text" placeholder="Create your ID (e.g. rashid_77)" class="w-full bg-black/50 p-3 rounded-xl border border-gray-700 focus:outline-none focus:border-cyan-500 transition-all text-white mt-1">
+                </div>
+
+                <div class="p-4 bg-cyan-500/10 rounded-2xl border border-cyan-500/20">
+                    <label class="text-xs uppercase text-gray-400 font-bold">Target Connection</label>
+                    <input id="friendId" type="text" placeholder="Friend's Unique ID" class="w-full bg-transparent text-xl font-bold focus:outline-none placeholder:text-gray-700 mt-1">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <button onclick="makeCall(true)" class="btn-call py-4 rounded-2xl flex items-center justify-center gap-2">
+                        <i class="fas fa-video"></i> Video Call
+                    </button>
+                    <button onclick="endCall()" class="bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-white py-4 rounded-2xl font-bold transition-all border border-red-500/30">
+                        <i class="fas fa-phone-slash"></i> Hang Up
+                    </button>
+                </div>
+            </div>
+
+            <div id="statusDot" class="flex items-center gap-2 text-sm text-gray-500">
+                <span class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></span>
+                <span id="statusText">System Offline</span>
+            </div>
+        </div>
+
+        <div class="flex-1 flex flex-col gap-4">
+            <div class="video-container flex-1 min-h-[250px] neon-glow">
+                <video id="remoteVideo" autoplay class="w-full h-full object-cover"></video>
+                <div class="absolute bottom-4 left-4 bg-black/60 px-3 py-1 rounded-full text-xs border border-white/10">Remote Participant</div>
+            </div>
+            
+            <div class="video-container h-32 w-48 self-end absolute md:relative bottom-10 right-10 md:bottom-0 md:right-0 border-cyan-500/50">
+                <video id="localVideo" autoplay muted class="w-full h-full object-cover"></video>
+                <div class="absolute bottom-2 left-2 bg-cyan-500 px-2 py-0.5 rounded text-[10px] text-black font-bold">YOU</div>
+            </div>
+        </div>
+    </div>
+
+<script>
+/* Firebase Config */
+const firebaseConfig = {
+    apiKey: "AIzaSyDLxciFvteNdb1-gLgwH96WvppubzjDABw",
+    authDomain: "neon-chat-app-db73c.firebaseapp.com",
+    projectId: "neon-chat-app-db73c",
+    databaseURL: "https://neon-chat-app-db73c-default-rtdb.firebaseio.com",
+    appId: "1:1017316698976:web:6250fa0dd5597deccbcc05"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let localStream, peer;
+
+// সিস্টেম স্ট্যাটাস আপডেট
+document.getElementById('myId').addEventListener('input', (e) => {
+    const statusText = document.getElementById('statusText');
+    const dot = document.querySelector('#statusDot span');
+    if(e.target.value.length > 2) {
+        statusText.innerText = "System Ready: Listening for calls...";
+        statusText.classList.add('text-cyan-400');
+        dot.classList.replace('bg-red-500', 'bg-cyan-500');
+    }
+});
+
+async function makeCall(isVideo) {
+    const myId = document.getElementById('myId').value;
+    const friendId = document.getElementById('friendId').value;
+
+    if(!myId || !friendId) return alert("Please set both IDs!");
+
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
+        document.getElementById('localVideo').srcObject = localStream;
+
+        peer = new SimplePeer({ initiator: true, trickle: false, stream: localStream });
+
+        peer.on('signal', data => {
+            db.ref('calls/' + friendId).set({ from: myId, signal: JSON.stringify(data) });
+        });
+
+        peer.on('stream', stream => {
+            document.getElementById('remoteVideo').srcObject = stream;
+        });
+
+        db.ref('answers/' + myId).on('value', snapshot => {
+            const data = snapshot.val();
+            if(data && peer) {
+                peer.signal(JSON.parse(data.signal));
+                document.getElementById('statusText').innerText = "Encrypted Connection Established";
+            }
+        });
+    } catch(err) {
+        alert("Camera access denied!");
+    }
+}
+
+// ইনকামিং কল লিসেনার
+setInterval(() => {
+    const myId = document.getElementById('myId').value;
+    if(!myId) return;
+
+    db.ref('calls/' + myId).once('value', async snapshot => {
+        const data = snapshot.val();
+        if(data && !peer) {
+            if(confirm("Incoming Encrypted Call from: " + data.from)) {
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+                document.getElementById('localVideo').srcObject = localStream;
+
+                peer = new SimplePeer({ initiator: false, trickle: false, stream: localStream });
+
+                peer.on('signal', signalData => {
+                    db.ref('answers/' + data.from).set({ signal: JSON.stringify(signalData) });
+                    db.ref('calls/' + myId).remove();
+                });
+
+                peer.on('stream', stream => {
+                    document.getElementById('remoteVideo').srcObject = stream;
+                });
+
+                peer.signal(JSON.parse(data.signal));
+            } else {
+                db.ref('calls/' + myId).remove();
+            }
+        }
+    });
+}, 3000);
+
+function endCall() {
+    if(peer) peer.destroy();
+    location.reload();
+}
+</script>
+</body>
+</html>
