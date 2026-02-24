@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neon Chat App</title>
+
+<!-- Tailwind CSS for colorful GUI -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Font Awesome for icons -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js"></script>
+<!-- WebRTC Peer -->
+<script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+
+<style>
+body { background: linear-gradient(135deg,#0f0c29,#302b63,#24243e); color:white; font-family:sans-serif; }
+#chatBox { height: 400px; overflow-y: scroll; padding: 10px; margin-bottom:10px; }
+.message { padding: 8px 12px; border-radius: 15px; margin: 5px; display: inline-block; max-width: 70%; }
+.self { background-color:#00ffff; color:#000; float:right; clear:both; }
+.other { background-color:#ff00ff; color:#fff; float:left; clear:both; }
+.glass-card { background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border-radius: 15px; padding:10px; margin:5px; }
+</style>
+</head>
+<body class="flex flex-col items-center justify-start min-h-screen p-4">
+
+<h1 class="text-3xl font-bold mb-4 text-center">💡 Neon Chat + Video Call</h1>
+
+<div class="flex flex-col w-full max-w-md">
+  <input id="username" placeholder="Enter your name" class="p-2 mb-2 rounded text-black" />
+  <input id="mobile" placeholder="Mobile (optional)" class="p-2 mb-2 rounded text-black" />
+  
+  <div id="chatBox" class="glass-card"></div>
+  
+  <div class="flex">
+    <input id="messageInput" placeholder="Type message..." class="flex-1 p-2 rounded-l text-black" />
+    <button onclick="sendMessage()" class="bg-cyan-500 px-4 rounded-r hover:bg-cyan-400">Send</button>
+  </div>
+
+  <div class="flex justify-around mt-4">
+    <button onclick="startCall()" class="bg-green-500 px-4 py-2 rounded hover:bg-green-400"><i class="fa-solid fa-phone"></i> Call</button>
+    <button onclick="startVideoCall()" class="bg-blue-500 px-4 py-2 rounded hover:bg-blue-400"><i class="fa-solid fa-video"></i> Video</button>
+    <button onclick="endCall()" class="bg-red-500 px-4 py-2 rounded hover:bg-red-400"><i class="fa-solid fa-phone-slash"></i> End</button>
+  </div>
+</div>
+
+<video id="localVideo" autoplay muted class="mt-2 w-60 rounded"></video>
+<video id="remoteVideo" autoplay class="mt-2 w-60 rounded"></video>
+
+<script>
+/* ===== Firebase Config (Your Provided IDs) ===== */
+const firebaseConfig = {
+    apiKey: "AIzaSyDLxciFvteNdb1-gLgwH96WvppubzjDABw",
+    authDomain: "neon-chat-app-db73c.firebaseapp.com",
+    projectId: "neon-chat-app-db73c",
+    storageBucket: "neon-chat-app-db73c.firebasestorage.app",
+    messagingSenderId: "1017316698976",
+    appId: "1:1017316698976:web:6250fa0dd5597deccbcc05",
+    measurementId: "G-P8GV7R784Z"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+/* ===== Real-time Chat ===== */
+const chatBox = document.getElementById("chatBox");
+let currentUser = '';
+let peer;
+let localStream;
+
+function sendMessage() {
+  currentUser = document.getElementById("username").value;
+  const mobile = document.getElementById("mobile").value;
+  const msg = document.getElementById("messageInput").value;
+  if(!currentUser || !msg) return alert("Enter name & message");
+
+  db.ref('chats/').push({
+    user: currentUser,
+    mobile: mobile || "",
+    msg: msg,
+    time: new Date().toLocaleTimeString()
+  });
+  document.getElementById("messageInput").value = '';
+}
+
+db.ref('chats/').on('child_added', snapshot => {
+  const data = snapshot.val();
+  const div = document.createElement("div");
+  div.className = "message " + (data.user === currentUser ? "self" : "other");
+  div.innerHTML = `<strong>${data.user}</strong>${data.mobile ? " ("+data.mobile+")" : ""}: ${data.msg}<br><small>${data.time}</small>`;
+  chatBox.appendChild(div);
+  chatBox.scrollTop = chatBox.scrollHeight;
+});
+
+/* ===== Audio/Video Call ===== */
+const localVideo = document.getElementById("localVideo");
+const remoteVideo = document.getElementById("remoteVideo");
+
+async function startCall() {
+  localStream = await navigator.mediaDevices.getUserMedia({ audio:true, video:false });
+  localVideo.srcObject = localStream;
+  initPeer(false);
+}
+
+async function startVideoCall() {
+  localStream = await navigator.mediaDevices.getUserMedia({ audio:true, video:true });
+  localVideo.srcObject = localStream;
+  initPeer(true);
+}
+
+function initPeer(isVideo){
+  peer = new SimplePeer({ initiator:true, trickle:false, stream: localStream });
+  peer.on('signal', data => db.ref('callSignal/').set(JSON.stringify(data)));
+  db.ref('callSignal/').on('value', snapshot => {
+    const val = snapshot.val();
+    if(val) peer.signal(JSON.parse(val));
+  });
+  peer.on('stream', remoteStream => {
+    if(isVideo) remoteVideo.srcObject = remoteStream;
+    else remoteVideo.srcObject = remoteStream;
+  });
+}
+
+function endCall() {
+  if(peer) peer.destroy();
+  if(localStream){ localStream.getTracks().forEach(t=>t.stop()); }
+  localVideo.srcObject = null;
+  remoteVideo.srcObject = null;
+  db.ref('callSignal/').remove();
+  alert("Call ended");
+}
+</script>
+</body>
+</html>
